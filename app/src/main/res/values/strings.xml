@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">常亮助手</string>
+    <string name="tile_label">前台常亮</string>
+
+    <!-- Navigation -->
+    <string name="nav_home">监控</string>
+    <string name="nav_apps">应用</string>
+    <string name="nav_settings">设置</string>
+
+    <!-- Permissions & Diagnostics -->
+    <string name="perm_usage_title">需要「使用情况访问权限」</string>
+    <string name="perm_usage_desc">用于识别当前处于前台的应用包名，仅在本地实时判断，不收集或上传任何隐私数据。</string>
+    <string name="perm_usage_action">去授权</string>
+    <string name="perm_notif_title">建议开启通知权限</string>
+    <string name="perm_notif_desc">用于在状态栏显示常亮服务状态，并防止后台监听被系统意外回收。</string>
+    <string name="perm_notif_action">允许通知</string>
+
+    <!-- Notification -->
+    <string name="notif_channel_name">前台常亮监听服务</string>
+    <string name="notif_channel_desc">显示屏幕常亮监听状态与当前激活的应用</string>
+    <string name="notif_title_active">屏幕常亮中 · %1$s</string>
+    <string name="notif_text_bright">高亮模式 · 应用处于前台时保持屏幕点亮</string>
+    <string name="notif_text_dim">微暗模式 · 保持唤醒并允许屏幕降低亮度</string>
+    <string name="notif_title_standby">监听中 · 等待目标应用</string>
+    <string name="notif_text_standby">已启用 %1$d 个应用常亮规则</string>
+    <string name="notif_title_paused_battery">已暂停 · 低电量保护 (%1$d%%)</string>
+    <string name="notif_text_paused_battery">电量低于设定阈值，连接充电器或电量恢复后继续</string>
+    <string name="notif_action_stop">停止监听</string>
+
+    <!-- Home Screen -->
+    <string name="status_active_awake">屏幕常亮生效中</string>
+    <string name="status_monitoring">前台监听运行中</string>
+    <string name="status_stopped">监听服务未开启</string>
+    <string name="status_needs_permission">等待权限授权</string>
+    <string name="status_low_battery_paused">低电量自动暂停</string>
+    <string name="current_foreground_label">当前前台应用</string>
+    <string name="current_foreground_none">暂无检测数据</string>
+    <string name="master_switch_on">监听已开启</string>
+    <string name="master_switch_off">点击开启监听</string>
+
+    <!-- Rules & Apps -->
+    <string name="section_active_rules">已配置常亮的应用</string>
+    <string name="empty_rules_title">还没有添加常亮应用</string>
+    <string name="empty_rules_desc">从已安装应用列表中勾选需要保持屏幕常亮的应用，例如阅读、导航、投屏或游戏。</string>
+    <string name="empty_rules_cta">浏览已安装应用</string>
+    <string name="search_apps_placeholder">搜索应用名称或包名…</string>
+    <string name="filter_user_apps">仅用户应用</string>
+    <string name="filter_all_apps">全部应用</string>
+    <string name="filter_selected_only">已添加</string>
+
+    <!-- Wake Mode & Rule Sheet -->
+    <string name="wake_mode_bright">高亮常亮</string>
+    <string name="wake_mode_bright_desc">保持屏幕完全点亮，适合视频、导航与展示</string>
+    <string name="wake_mode_dim">微暗唤醒</string>
+    <string name="wake_mode_dim_desc">允许屏幕变暗但不熄屏锁屏，更省电护眼</string>
+    <string name="timeout_unlimited">不限时</string>
+    <string name="timeout_minutes">%1$d 分钟</string>
+    <string name="rule_sheet_title">常亮规则设置</string>
+    <string name="rule_sheet_enable">启用此应用常亮</string>
+    <string name="rule_sheet_mode">常亮模式</string>
+    <string name="rule_sheet_timeout">单次最长常亮时间</string>
+    <string name="rule_sheet_save">保存规则</string>
+    <string name="rule_sheet_remove">移除规则</string>
+
+    <!-- Settings -->
+    <string name="settings_monitor_section">监听策略</string>
+    <string name="settings_defaults_section">新规则默认值</string>
+    <string name="settings_power_section">电量与系统</string>
+    <string name="settings_polling_interval">前台检测间隔</string>
+    <string name="settings_low_battery_pause">低电量自动暂停</string>
+    <string name="settings_low_battery_desc">未充电且电量低于 %1$d%% 时释放常亮锁</string>
+    <string name="settings_boot_start">开机自动启动监听</string>
+    <string name="settings_boot_desc">设备重启后自动恢复前台监听服务</string>
+    <string name="settings_battery_opt_title">后台电池优化设置</string>
+    <string name="settings_battery_opt_desc">若服务在后台容易被系统休眠，可在此设为「不受限制」</string>
+    <string name="settings_usage_access_title">使用情况访问权限</string>
+    <string name="settings_clear_rules">清空全部常亮规则</string>
+    <string name="status_granted">已授权</string>
+    <string name="status_not_granted">未授权</string>
+</resources>

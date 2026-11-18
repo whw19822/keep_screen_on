@@ -1,0 +1,6 @@
+{
+  "name": "常亮助手",
+  "description": "智能监测前台运行的应用，在指定应用处于前台时自动保持屏幕常亮，支持亮度模式与安全定时。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
