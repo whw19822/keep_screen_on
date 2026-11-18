@@ -67,6 +67,7 @@ fun HomeScreen(
   uiState: ScreenKeepUiState,
   onToggleMasterService: (Boolean) -> Unit,
   onRequestUsagePermission: () -> Unit,
+  onRequestOverlayPermission: () -> Unit,
   onRequestNotificationPermission: () -> Unit,
   onToggleRuleEnabled: (AppWithRule, Boolean) -> Unit,
   onEditRule: (AppWithRule) -> Unit,
@@ -99,6 +100,24 @@ fun HomeScreen(
           isUrgent = true,
           onAction = onRequestUsagePermission,
           actionTag = "grant_usage_access_button",
+        )
+      }
+    }
+
+    item(key = "overlay_permission_banner") {
+      AnimatedVisibility(
+        visible = !uiState.hasOverlayPermission,
+        enter = fadeIn() + expandVertically(),
+        exit = fadeOut() + shrinkVertically(),
+      ) {
+        PermissionBannerCard(
+          icon = Icons.Rounded.Visibility,
+          title = stringResource(R.string.perm_overlay_title),
+          description = stringResource(R.string.perm_overlay_desc),
+          actionLabel = stringResource(R.string.perm_overlay_action),
+          isUrgent = true,
+          onAction = onRequestOverlayPermission,
+          actionTag = "grant_overlay_permission_button",
         )
       }
     }
@@ -336,8 +355,8 @@ private fun HeroMonitorCard(
           modifier = Modifier.weight(1f),
         )
         MetricPill(
-          label = "检测间隔",
-          value = "${uiState.settings.pollingIntervalMs / 1000f}s",
+          label = "常亮引擎",
+          value = if (uiState.hasOverlayPermission) "悬浮窗常亮" else "唤醒锁兼容",
           modifier = Modifier.weight(1f),
         )
         MetricPill(

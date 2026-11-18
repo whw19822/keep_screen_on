@@ -224,6 +224,7 @@ fun ScreenKeepRootApp(viewModel: ScreenKeepViewModel = viewModel()) {
                   viewModel.toggleMasterService(enable)
                 },
                 onRequestUsagePermission = { UsageStatsHelper.openUsageAccessSettings(context) },
+                onRequestOverlayPermission = { UsageStatsHelper.openOverlaySettings(context) },
                 onRequestNotificationPermission = requestNotificationPermission,
                 onToggleRuleEnabled = { item, enabled ->
                   viewModel.toggleAppSelection(item, enabled)
@@ -254,6 +255,7 @@ fun ScreenKeepRootApp(viewModel: ScreenKeepViewModel = viewModel()) {
                 onLowBatteryThresholdChange = viewModel::setLowBatteryThreshold,
                 onStartOnBootChange = viewModel::setStartOnBoot,
                 onOpenUsageAccessSettings = { UsageStatsHelper.openUsageAccessSettings(context) },
+                onOpenOverlaySettings = { UsageStatsHelper.openOverlaySettings(context) },
                 onRequestNotificationPermission = requestNotificationPermission,
                 onOpenBatteryOptimizationSettings = {
                   UsageStatsHelper.openBatteryOptimizationSettings(context)

@@ -35,6 +35,7 @@ enum class AppFilter {
 data class ScreenKeepUiState(
   val isLoadingApps: Boolean = true,
   val hasUsagePermission: Boolean = false,
+  val hasOverlayPermission: Boolean = false,
   val hasNotificationPermission: Boolean = true,
   val settings: AppSettings = AppSettings(),
   val monitorState: MonitorState = MonitorState(),
@@ -56,20 +57,30 @@ class ScreenKeepViewModel(application: Application) : AndroidViewModel(applicati
   private val installedAppsFlow = MutableStateFlow<List<InstalledAppItem>>(emptyList())
   private val isLoadingAppsFlow = MutableStateFlow(true)
   private val hasUsagePermissionFlow = MutableStateFlow(checkUsagePermission())
+  private val hasOverlayPermissionFlow = MutableStateFlow(checkOverlayPermission())
   private val hasNotificationPermissionFlow = MutableStateFlow(checkNotificationPermission())
   private val searchQueryFlow = MutableStateFlow("")
   private val appFilterFlow = MutableStateFlow(AppFilter.USER_ONLY)
   private val editingAppFlow = MutableStateFlow<AppWithRule?>(null)
+  private var pendingEnableAfterPermission = false
+
+  private val permissionsFlow =
+    combine(
+      hasUsagePermissionFlow,
+      hasOverlayPermissionFlow,
+      hasNotificationPermissionFlow,
+    ) { usage, overlay, notif ->
+      Triple(usage, overlay, notif)
+    }
 
   private val baseCombined =
     combine(
       installedAppsFlow,
       ruleDao.observeAllRules(),
       isLoadingAppsFlow,
-      hasUsagePermissionFlow,
-      hasNotificationPermissionFlow,
-    ) { apps, rules, isLoading, usagePerm, notifPerm ->
-      BaseData(apps, rules, isLoading, usagePerm, notifPerm)
+      permissionsFlow,
+    ) { apps, rules, isLoading, perms ->
+      BaseData(apps, rules, isLoading, perms.first, perms.second, perms.third)
     }
 
   private val prefsCombined =
@@ -122,6 +133,7 @@ class ScreenKeepViewModel(application: Application) : AndroidViewModel(applicati
         ScreenKeepUiState(
           isLoadingApps = base.isLoading,
           hasUsagePermission = base.hasUsagePermission,
+          hasOverlayPermission = base.hasOverlayPermission,
           hasNotificationPermission = base.hasNotificationPermission,
           settings = prefs.settings,
           monitorState = prefs.monitor,
@@ -139,6 +151,7 @@ class ScreenKeepViewModel(application: Application) : AndroidViewModel(applicati
         initialValue =
           ScreenKeepUiState(
             hasUsagePermission = hasUsagePermissionFlow.value,
+            hasOverlayPermission = hasOverlayPermissionFlow.value,
             hasNotificationPermission = hasNotificationPermissionFlow.value,
           ),
       )
@@ -149,11 +162,26 @@ class ScreenKeepViewModel(application: Application) : AndroidViewModel(applicati
 
   fun refreshPermissions() {
     val usageGranted = checkUsagePermission()
+    val overlayGranted = checkOverlayPermission()
     val notifGranted = checkNotificationPermission()
     hasUsagePermissionFlow.value = usageGranted
+    hasOverlayPermissionFlow.value = overlayGranted
     hasNotificationPermissionFlow.value = notifGranted
 
-    if (usageGranted && uiState.value.settings.serviceEnabled && !MonitorRuntimeState.state.value.isServiceRunning) {
+    if (usageGranted && pendingEnableAfterPermission) {
+      pendingEnableAfterPermission = false
+      viewModelScope.launch {
+        settingsPrefs.setServiceEnabled(true)
+        KeepAwakeService.start(context)
+      }
+      return
+    }
+
+    if (
+      usageGranted &&
+        uiState.value.settings.serviceEnabled &&
+        !MonitorRuntimeState.state.value.isServiceRunning
+    ) {
       KeepAwakeService.start(context)
     }
   }
@@ -185,9 +213,11 @@ class ScreenKeepViewModel(application: Application) : AndroidViewModel(applicati
   fun toggleMasterService(enable: Boolean) {
     viewModelScope.launch {
       if (enable && !checkUsagePermission()) {
+        pendingEnableAfterPermission = true
         UsageStatsHelper.openUsageAccessSettings(context)
         return@launch
       }
+      pendingEnableAfterPermission = false
       settingsPrefs.setServiceEnabled(enable)
       if (enable) {
         KeepAwakeService.start(context)
@@ -277,6 +307,8 @@ class ScreenKeepViewModel(application: Application) : AndroidViewModel(applicati
 
   private fun checkUsagePermission(): Boolean = UsageStatsHelper.hasUsageStatsPermission(context)
 
+  private fun checkOverlayPermission(): Boolean = UsageStatsHelper.canDrawOverlays(context)
+
   private fun checkNotificationPermission(): Boolean {
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
@@ -291,6 +323,7 @@ class ScreenKeepViewModel(application: Application) : AndroidViewModel(applicati
     val rules: List<KeepAwakeRuleEntity>,
     val isLoading: Boolean,
     val hasUsagePermission: Boolean,
+    val hasOverlayPermission: Boolean,
     val hasNotificationPermission: Boolean,
   )
 

@@ -12,6 +12,9 @@
     <string name="perm_usage_title">需要「使用情况访问权限」</string>
     <string name="perm_usage_desc">用于识别当前处于前台的应用包名，仅在本地实时判断，不收集或上传任何隐私数据。</string>
     <string name="perm_usage_action">去授权</string>
+    <string name="perm_overlay_title">需要「显示在其他应用上层」权限</string>
+    <string name="perm_overlay_desc">部分系统会忽略后台唤醒锁导致依然熄屏；开启后将通过 1px 透明常亮视图稳定阻止熄屏，不遮挡任何点击。</string>
+    <string name="perm_overlay_action">去开启</string>
     <string name="perm_notif_title">建议开启通知权限</string>
     <string name="perm_notif_desc">用于在状态栏显示常亮服务状态，并防止后台监听被系统意外回收。</string>
     <string name="perm_notif_action">允许通知</string>

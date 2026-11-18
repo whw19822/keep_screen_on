@@ -38,6 +38,10 @@ object UsageStatsHelper {
     }
   }
 
+  fun canDrawOverlays(context: Context): Boolean {
+    return Settings.canDrawOverlays(context)
+  }
+
   fun openUsageAccessSettings(context: Context) {
     val targetedIntent =
       Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
@@ -54,6 +58,23 @@ object UsageStatsHelper {
     }
   }
 
+  fun openOverlaySettings(context: Context) {
+    val targetedIntent =
+      Intent(
+          Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+          Uri.fromParts("package", context.packageName, null),
+        )
+        .apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+    val started = runCatching { context.startActivity(targetedIntent) }.isSuccess
+    if (!started) {
+      val fallbackIntent =
+        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+      runCatching { context.startActivity(fallbackIntent) }
+    }
+  }
+
   fun openBatteryOptimizationSettings(context: Context) {
     val intent =
       Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
@@ -63,33 +84,54 @@ object UsageStatsHelper {
   }
 
   /**
-   * Resolves the most recently resumed foreground package within [lookbackMs].
-   * Returns null if no activity resume event occurred inside [lookbackMs].
+   * Resolves the most recently resumed foreground package within [lookbackMs],
+   * falling back to queryUsageStats when [useUsageStatsFallback] is true.
    */
-  fun queryLatestForegroundPackage(context: Context, lookbackMs: Long): String? {
+  fun queryLatestForegroundPackage(
+    context: Context,
+    lookbackMs: Long,
+    useUsageStatsFallback: Boolean = false,
+  ): String? {
     if (!hasUsageStatsPermission(context)) return null
     val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return null
     val now = System.currentTimeMillis()
     val start = (now - lookbackMs).coerceAtLeast(0L)
-    val events = runCatching { usm.queryEvents(start, now) }.getOrNull() ?: return null
+    val events = runCatching { usm.queryEvents(start, now) }.getOrNull()
 
     var latestPackage: String? = null
     var latestTimestamp = 0L
-    val event = UsageEvents.Event()
-
-    while (events.hasNextEvent()) {
-      events.getNextEvent(event)
-      val isResumed =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-          event.eventType == UsageEvents.Event.ACTIVITY_RESUMED
-        } else {
-          @Suppress("DEPRECATION") event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND
+    if (events != null) {
+      val event = UsageEvents.Event()
+      while (events.hasNextEvent()) {
+        events.getNextEvent(event)
+        val isResumed =
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            event.eventType == UsageEvents.Event.ACTIVITY_RESUMED
+          } else {
+            @Suppress("DEPRECATION") event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND
+          }
+        if (isResumed && event.timeStamp >= latestTimestamp && !event.packageName.isNullOrBlank()) {
+          latestTimestamp = event.timeStamp
+          latestPackage = event.packageName
         }
-      if (isResumed && event.timeStamp >= latestTimestamp && !event.packageName.isNullOrBlank()) {
-        latestTimestamp = event.timeStamp
-        latestPackage = event.packageName
       }
     }
-    return latestPackage
+
+    if (latestPackage != null) return latestPackage
+
+    if (useUsageStatsFallback) {
+      val stats =
+        runCatching {
+            usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, now)
+          }
+          .getOrNull()
+      val recent =
+        stats
+          ?.filter { !it.packageName.isNullOrBlank() && it.lastTimeUsed > 0L }
+          ?.maxByOrNull { it.lastTimeUsed }
+      return recent?.packageName
+    }
+
+    return null
   }
 }

@@ -64,6 +64,7 @@ fun SettingsScreen(
   onLowBatteryThresholdChange: (Int) -> Unit,
   onStartOnBootChange: (Boolean) -> Unit,
   onOpenUsageAccessSettings: () -> Unit,
+  onOpenOverlaySettings: () -> Unit,
   onRequestNotificationPermission: () -> Unit,
   onOpenBatteryOptimizationSettings: () -> Unit,
   onClearAllRules: () -> Unit,
@@ -246,6 +247,19 @@ fun SettingsScreen(
             isHighlighted = !uiState.hasUsagePermission,
             onClick = onOpenUsageAccessSettings,
             tag = "settings_usage_access_row",
+          )
+
+          HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+          SettingsActionRow(
+            icon = Icons.Rounded.Tune,
+            title = "悬浮窗常亮权限（推荐）",
+            subtitle =
+              if (uiState.hasOverlayPermission) "已授权 · 使用高可靠透明常亮层"
+              else "未授权 · 部分机型可能受限，建议开启",
+            isHighlighted = !uiState.hasOverlayPermission,
+            onClick = onOpenOverlaySettings,
+            tag = "settings_overlay_access_row",
           )
 
           HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

@@ -10,10 +10,17 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.graphics.Color
+import android.graphics.PixelFormat
 import android.os.BatteryManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
+import android.view.Gravity
+import android.view.View
+import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -38,6 +45,7 @@ import kotlinx.coroutines.launch
 class KeepAwakeService : Service() {
 
   private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+  private val mainHandler = Handler(Looper.getMainLooper())
   private var monitorJob: Job? = null
 
   private lateinit var settingsPrefs: SettingsPreferences
@@ -49,6 +57,8 @@ class KeepAwakeService : Service() {
 
   private var lastKnownForegroundPackage: String? = null
   private var activeWakeLock: PowerManager.WakeLock? = null
+  private var overlayView: View? = null
+  private var isOverlayAttached: Boolean = false
   private var heldWakeMode: WakeMode? = null
   private var heldForPackage: String? = null
   private var wakeLockAcquiredAt: Long = 0L
@@ -62,10 +72,11 @@ class KeepAwakeService : Service() {
           Intent.ACTION_SCREEN_OFF -> {
             isScreenInteractive = false
             timedOutPackage = null
-            releaseWakeLock()
+            releaseScreenAwake()
             MonitorRuntimeState.update {
               it.copy(
                 isWakeLockHeld = false,
+                isOverlayActive = false,
                 wakeLockMode = null,
                 wakeLockStartedAtMillis = null,
                 pauseReason = MonitorPauseReason.SCREEN_OFF,
@@ -75,7 +86,7 @@ class KeepAwakeService : Service() {
           Intent.ACTION_SCREEN_ON,
           Intent.ACTION_USER_PRESENT -> {
             isScreenInteractive = true
-            evaluateOnce(initialLookbackMs = 15_000L)
+            evaluateOnce(initialLookbackMs = 15_000L, useUsageStatsFallback = true)
           }
         }
       }
@@ -107,7 +118,11 @@ class KeepAwakeService : Service() {
       return START_NOT_STICKY
     }
 
-    val notification = buildNotification(title = getString(R.string.notif_title_standby), text = getString(R.string.notif_text_standby, enabledRulesMap.size))
+    val notification =
+      buildNotification(
+        title = getString(R.string.notif_title_standby),
+        text = getString(R.string.notif_text_standby, enabledRulesMap.size),
+      )
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
       ServiceCompat.startForeground(
         this,
@@ -126,7 +141,7 @@ class KeepAwakeService : Service() {
 
   override fun onDestroy() {
     monitorJob?.cancel()
-    releaseWakeLock()
+    releaseScreenAwake()
     runCatching { unregisterReceiver(screenReceiver) }
     MonitorRuntimeState.reset()
     serviceScope.cancel()
@@ -140,13 +155,13 @@ class KeepAwakeService : Service() {
     serviceScope.launch {
       dao.observeEnabledRules().collectLatest { rules ->
         enabledRulesMap = rules.associateBy { it.packageName }
-        evaluateOnce(initialLookbackMs = 5_000L)
+        evaluateOnce(initialLookbackMs = 10_000L, useUsageStatsFallback = true)
       }
     }
     serviceScope.launch {
       settingsPrefs.settingsFlow.collectLatest { settings ->
         currentSettings = settings
-        evaluateOnce(initialLookbackMs = 5_000L)
+        evaluateOnce(initialLookbackMs = 10_000L, useUsageStatsFallback = false)
       }
     }
   }
@@ -155,26 +170,32 @@ class KeepAwakeService : Service() {
     monitorJob?.cancel()
     monitorJob =
       serviceScope.launch {
-        // Initial wider lookback so we immediately detect the current foreground app
-        evaluateOnce(initialLookbackMs = 24L * 60L * 60L * 1000L)
+        evaluateOnce(
+          initialLookbackMs = 24L * 60L * 60L * 1000L,
+          useUsageStatsFallback = true,
+        )
         while (isActive) {
           val interval = currentSettings.pollingIntervalMs.coerceIn(750L, 5000L)
           delay(interval)
           if (isScreenInteractive) {
-            evaluateOnce(initialLookbackMs = interval * 3L + 2_000L)
+            evaluateOnce(
+              initialLookbackMs = interval * 4L + 3_000L,
+              useUsageStatsFallback = lastKnownForegroundPackage == null,
+            )
           }
         }
       }
   }
 
   @Synchronized
-  private fun evaluateOnce(initialLookbackMs: Long) {
+  private fun evaluateOnce(initialLookbackMs: Long, useUsageStatsFallback: Boolean) {
     if (!UsageStatsHelper.hasUsageStatsPermission(applicationContext)) {
-      releaseWakeLock()
+      releaseScreenAwake()
       MonitorRuntimeState.update {
         it.copy(
           isServiceRunning = true,
           isWakeLockHeld = false,
+          isOverlayActive = false,
           wakeLockMode = null,
           wakeLockStartedAtMillis = null,
           pauseReason = MonitorPauseReason.NO_USAGE_PERMISSION,
@@ -184,11 +205,16 @@ class KeepAwakeService : Service() {
     }
 
     if (!isScreenInteractive) {
-      releaseWakeLock()
+      releaseScreenAwake()
       return
     }
 
-    val detected = UsageStatsHelper.queryLatestForegroundPackage(applicationContext, initialLookbackMs)
+    val detected =
+      UsageStatsHelper.queryLatestForegroundPackage(
+        context = applicationContext,
+        lookbackMs = initialLookbackMs,
+        useUsageStatsFallback = useUsageStatsFallback,
+      )
     if (detected != null) {
       if (detected != lastKnownForegroundPackage) {
         timedOutPackage = null
@@ -200,8 +226,12 @@ class KeepAwakeService : Service() {
     val fgLabel = fgPackage?.let { appsRepo.resolveAppLabel(it) }
 
     val (batteryPct, isCharging) = readBatteryStatus()
-    if (currentSettings.pauseOnLowBattery && !isCharging && batteryPct <= currentSettings.lowBatteryThreshold) {
-      releaseWakeLock()
+    if (
+      currentSettings.pauseOnLowBattery &&
+        !isCharging &&
+        batteryPct <= currentSettings.lowBatteryThreshold
+    ) {
+      releaseScreenAwake()
       updateNotificationIfChanged(
         title = getString(R.string.notif_title_paused_battery, batteryPct),
         text = getString(R.string.notif_text_paused_battery),
@@ -214,6 +244,7 @@ class KeepAwakeService : Service() {
           activeRulePackage = null,
           activeRuleLabel = null,
           isWakeLockHeld = false,
+          isOverlayActive = false,
           wakeLockMode = null,
           wakeLockStartedAtMillis = null,
           pauseReason = MonitorPauseReason.LOW_BATTERY,
@@ -225,7 +256,7 @@ class KeepAwakeService : Service() {
 
     val matchingRule = fgPackage?.let { enabledRulesMap[it] }
     if (matchingRule == null || !matchingRule.isEnabled) {
-      releaseWakeLock()
+      releaseScreenAwake()
       updateNotificationIfChanged(
         title = getString(R.string.notif_title_standby),
         text = getString(R.string.notif_text_standby, enabledRulesMap.size),
@@ -238,6 +269,7 @@ class KeepAwakeService : Service() {
           activeRulePackage = null,
           activeRuleLabel = null,
           isWakeLockHeld = false,
+          isOverlayActive = false,
           wakeLockMode = null,
           wakeLockStartedAtMillis = null,
           pauseReason = MonitorPauseReason.NONE,
@@ -247,9 +279,8 @@ class KeepAwakeService : Service() {
       return
     }
 
-    // Check if safety timer has already expired for this foreground session
     if (timedOutPackage == matchingRule.packageName) {
-      releaseWakeLock()
+      releaseScreenAwake()
       updateNotificationIfChanged(
         title = getString(R.string.notif_title_standby),
         text = getString(R.string.notif_text_standby, enabledRulesMap.size),
@@ -262,6 +293,7 @@ class KeepAwakeService : Service() {
           activeRulePackage = matchingRule.packageName,
           activeRuleLabel = matchingRule.appLabel,
           isWakeLockHeld = false,
+          isOverlayActive = false,
           wakeLockMode = null,
           wakeLockStartedAtMillis = null,
           pauseReason = MonitorPauseReason.SAFETY_TIMEOUT_REACHED,
@@ -271,7 +303,6 @@ class KeepAwakeService : Service() {
       return
     }
 
-    // Check active safety duration limit
     if (
       heldForPackage == matchingRule.packageName &&
         matchingRule.maxDurationMinutes > 0 &&
@@ -280,7 +311,7 @@ class KeepAwakeService : Service() {
       val elapsedMs = System.currentTimeMillis() - wakeLockAcquiredAt
       if (elapsedMs >= matchingRule.maxDurationMinutes * 60_000L) {
         timedOutPackage = matchingRule.packageName
-        releaseWakeLock()
+        releaseScreenAwake()
         MonitorRuntimeState.update {
           it.copy(
             isServiceRunning = true,
@@ -289,6 +320,7 @@ class KeepAwakeService : Service() {
             activeRulePackage = matchingRule.packageName,
             activeRuleLabel = matchingRule.appLabel,
             isWakeLockHeld = false,
+            isOverlayActive = false,
             wakeLockMode = null,
             wakeLockStartedAtMillis = null,
             pauseReason = MonitorPauseReason.SAFETY_TIMEOUT_REACHED,
@@ -299,7 +331,7 @@ class KeepAwakeService : Service() {
       }
     }
 
-    acquireOrUpdateWakeLock(matchingRule)
+    acquireOrUpdateScreenAwake(matchingRule)
     val notifText =
       if (matchingRule.wakeMode == WakeMode.BRIGHT) {
         getString(R.string.notif_text_bright)
@@ -317,7 +349,8 @@ class KeepAwakeService : Service() {
         currentForegroundLabel = fgLabel,
         activeRulePackage = matchingRule.packageName,
         activeRuleLabel = matchingRule.appLabel,
-        isWakeLockHeld = activeWakeLock?.isHeld == true,
+        isWakeLockHeld = (activeWakeLock?.isHeld == true) || isOverlayAttached,
+        isOverlayActive = isOverlayAttached,
         wakeLockMode = matchingRule.wakeMode,
         wakeLockStartedAtMillis = wakeLockAcquiredAt,
         pauseReason = MonitorPauseReason.NONE,
@@ -326,34 +359,109 @@ class KeepAwakeService : Service() {
     }
   }
 
-  private fun acquireOrUpdateWakeLock(rule: KeepAwakeRuleEntity) {
-    if (
-      activeWakeLock?.isHeld == true &&
+  private fun acquireOrUpdateScreenAwake(rule: KeepAwakeRuleEntity) {
+    val canOverlay = UsageStatsHelper.canDrawOverlays(applicationContext)
+    val alreadyActive =
+      ((activeWakeLock?.isHeld == true) || isOverlayAttached) &&
         heldForPackage == rule.packageName &&
-        heldWakeMode == rule.wakeMode
-    ) {
+        heldWakeMode == rule.wakeMode &&
+        (canOverlay == isOverlayAttached)
+
+    if (alreadyActive) {
       return
     }
-    releaseWakeLock()
+
+    releaseScreenAwake()
+
+    // 1. Primary high-reliability engine: 1x1 transparent TYPE_APPLICATION_OVERLAY with FLAG_KEEP_SCREEN_ON
+    if (canOverlay) {
+      attachKeepScreenOnOverlay(rule.wakeMode)
+    }
+
+    // 2. Companion / fallback engine: PowerManager screen WakeLock
     val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
     @Suppress("DEPRECATION")
     val levelFlags =
       when (rule.wakeMode) {
-        WakeMode.BRIGHT -> PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE
+        WakeMode.BRIGHT ->
+          PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+            PowerManager.ACQUIRE_CAUSES_WAKEUP or
+            PowerManager.ON_AFTER_RELEASE
         WakeMode.DIM -> PowerManager.SCREEN_DIM_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE
       }
     val wl =
-      pm.newWakeLock(levelFlags, "ScreenKeep:ForegroundRule:${rule.packageName}").apply {
-        setReferenceCounted(false)
-        acquire()
-      }
+      runCatching {
+          pm.newWakeLock(levelFlags, "ScreenKeep:ForegroundRule:${rule.packageName}").apply {
+            setReferenceCounted(false)
+            acquire()
+          }
+        }
+        .getOrNull()
+
     activeWakeLock = wl
     heldForPackage = rule.packageName
     heldWakeMode = rule.wakeMode
     wakeLockAcquiredAt = System.currentTimeMillis()
   }
 
-  private fun releaseWakeLock() {
+  private fun attachKeepScreenOnOverlay(mode: WakeMode) {
+    isOverlayAttached = true
+    mainHandler.post {
+      if (!isOverlayAttached) return@post
+      val wm = getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return@post
+      removeOverlayViewOnMainThread(wm)
+
+      val layoutType =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+          @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+        }
+
+      val params =
+        WindowManager.LayoutParams(
+            1,
+            1,
+            layoutType,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+              WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+              WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+              WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+              WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+            PixelFormat.TRANSLUCENT,
+          )
+          .apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = 0
+            screenBrightness =
+              if (mode == WakeMode.DIM) 0.15f
+              else WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+          }
+
+      val view =
+        View(applicationContext).apply {
+          setBackgroundColor(Color.TRANSPARENT)
+          keepScreenOn = true
+        }
+
+      val added = runCatching { wm.addView(view, params) }.isSuccess
+      if (added) {
+        overlayView = view
+      } else {
+        isOverlayAttached = false
+      }
+    }
+  }
+
+  private fun releaseScreenAwake() {
+    isOverlayAttached = false
+    mainHandler.post {
+      val wm = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+      if (wm != null) {
+        removeOverlayViewOnMainThread(wm)
+      }
+    }
     runCatching {
       if (activeWakeLock?.isHeld == true) {
         activeWakeLock?.release()
@@ -363,6 +471,12 @@ class KeepAwakeService : Service() {
     heldForPackage = null
     heldWakeMode = null
     wakeLockAcquiredAt = 0L
+  }
+
+  private fun removeOverlayViewOnMainThread(wm: WindowManager) {
+    val existing = overlayView ?: return
+    overlayView = null
+    runCatching { wm.removeViewImmediate(existing) }
   }
 
   private fun readBatteryStatus(): Pair<Int, Boolean> {

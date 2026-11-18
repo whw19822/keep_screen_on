@@ -21,6 +21,7 @@ data class MonitorState(
   val activeRulePackage: String? = null,
   val activeRuleLabel: String? = null,
   val isWakeLockHeld: Boolean = false,
+  val isOverlayActive: Boolean = false,
   val wakeLockMode: WakeMode? = null,
   val wakeLockStartedAtMillis: Long? = null,
   val pauseReason: MonitorPauseReason = MonitorPauseReason.NONE,

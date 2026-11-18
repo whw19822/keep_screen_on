@@ -20,7 +20,8 @@
 | 权限 | 用途 |
 | --- | --- |
 | `PACKAGE_USAGE_STATS` | 在本地查询前台运行的应用切换事件（需用户在系统设置中手动授权） |
-| `WAKE_LOCK` | 在匹配到目标应用时维持屏幕唤醒状态 |
+| `SYSTEM_ALERT_WINDOW` | 通过 1px 透明 `FLAG_KEEP_SCREEN_ON` 悬浮视图稳定防熄屏，兼容现代 Android 与各类 OEM 系统 |
+| `WAKE_LOCK` | 在匹配到目标应用时维持屏幕唤醒状态（兼容回退引擎） |
 | `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_SPECIAL_USE` | 保持前台监测服务稳定运行并展示实时状态通知 |
 | `POST_NOTIFICATIONS` | 在 Android 13+ 设备上显示服务状态通知与快捷停止按钮 |
 | `RECEIVE_BOOT_COMPLETED` | 当用户开启「开机自动启动监听」后，在系统重启时恢复服务 |
